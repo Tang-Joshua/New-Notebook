@@ -312,7 +312,7 @@ class ExcelFormulaApp(QMainWindow):
         # Clean up Excel connection when closing
         if self.workbook:
             try:
-                self.workbook.close()
+                self.workbook.close() 
             except:
                 pass
         if self.excel_app:
