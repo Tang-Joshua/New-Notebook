@@ -78,6 +78,7 @@ class ExcelCellMarkerApp(QMainWindow):
         if file_path:
             try:
                 self.file_path = file_path
+                self.workbook = openpyxl.load_workbook(self.file_path) 
                 self.lbl_current_file.setText(f"Current file: {file_path}")
                 self.btn_add_selector.setEnabled(True)
                 self.btn_save.setEnabled(True)
