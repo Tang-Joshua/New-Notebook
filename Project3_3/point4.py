@@ -71,12 +71,12 @@ class ExcelCellMarkerApp(QMainWindow):
     
     def select_excel_file(self):
         file_path, _ = QFileDialog.getOpenFileName(
+            
             self, "Select Excel File", "", "Excel Files (*.xlsx *.xls)"
         )
         
         if file_path:
             try:
-                self.workbook = openpyxl.load_workbook(file_path)
                 self.file_path = file_path
                 self.lbl_current_file.setText(f"Current file: {file_path}")
                 self.btn_add_selector.setEnabled(True)
