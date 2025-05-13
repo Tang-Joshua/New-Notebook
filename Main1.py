@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
     QAbstractItemView, QHeaderView, QTableWidgetItem, QStyledItemDelegate, QStyleOptionViewItem, QTableView
 )
 from PyQt6.QtCore import Qt, QPropertyAnimation, pyqtProperty, QEasingCurve, QRect
-from PyQt6.QtGui import QPainter, QColor, QPen, QBrush
+from PyQt6.QtGui import QPainter, QColor, QPen, QBrush, QStandardItemModel
 from PyQt6.QtWidgets import QScroller, QScroller, QScrollerProperties, QStyle,QStyledItemDelegate, QApplication, QTableWidgetItem, QTableWidget
 
 import string
@@ -66,37 +66,66 @@ class AnimatedButton(QPushButton):
 
     color = pyqtProperty(QColor, get_color, set_color)
 
-class ExcelStyleDelegate(QStyledItemDelegate):
-    def paint(self, painter, option, index):
-        option2 = QStyleOptionViewItem(option)
+class ExcelStyleTableView(QTableView):
+    def __init__(self, parent=None):
+        super().__init__(parent)
 
-        # Disable default selection state
-        if option.state & QStyle.StateFlag.State_Selected:
-            option2.state &= ~QStyle.StateFlag.State_Selected
+        # Don't connect here — model isn't set yet
 
-        # Explicitly set the background to the default color (e.g., white or transparent)
-        painter.fillRect(option.rect, QBrush(QColor(255, 255, 255)))  # White background
+    def setModel(self, model):
+        super().setModel(model)
 
-        # Default painting for text, etc.
-        super().paint(painter, option2, index)
+        # Now the selectionModel is valid
+        self.selectionModel().selectionChanged.connect(self._refresh_selection)
 
-        # Draw green border for the current cell
-        table = index.model().parent()
-        if table.currentRow() == index.row() and table.currentColumn() == index.column():
+    def _refresh_selection(self, selected, deselected):
+        self.viewport().update()
+
+    def mouseMoveEvent(self, event):
+        super().mouseMoveEvent(event)
+        self.viewport().update()
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+
+        selection = self.selectionModel().selection()
+        if not selection.isEmpty():
+            selected_range = selection.first()
+            top_left = self.model().index(selected_range.top(), selected_range.left())
+            bottom_right = self.model().index(selected_range.bottom(), selected_range.right())
+
+            rect_top_left = self.visualRect(top_left)
+            rect_bottom_right = self.visualRect(bottom_right)
+
+            selection_rect = rect_top_left.united(rect_bottom_right).adjusted(0, 0, -1, -1)
+
+            painter = QPainter(self.viewport())
             pen = QPen(QColor(0, 128, 0), 2)
             painter.setPen(pen)
-            rect = option.rect.adjusted(1, 1, -1, -1)
-            painter.drawRect(rect)
+            painter.drawRect(selection_rect)
 
-            # Draw autofill handle (small square)
+            # Autofill handle
             handle_size = 6
-            handle_x = rect.right() - handle_size
-            handle_y = rect.bottom() - handle_size
-            handle_rect = QRect(handle_x, handle_y, handle_size, handle_size)
+            handle_rect = QRect(
+                selection_rect.right() - handle_size + 1,
+                selection_rect.bottom() - handle_size + 1,
+                handle_size,
+                handle_size
+            )
+            painter.fillRect(handle_rect, QColor(0, 128, 0))
 
-            painter.setBrush(QBrush(QColor(0, 128, 0)))
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawRect(handle_rect)
+class WhiteBackgroundDelegate(QStyledItemDelegate):
+    def paint(self, painter, option, index):
+        # Disable selection background
+        if option.state & QStyle.StateFlag.State_Selected:
+            option.state &= ~QStyle.StateFlag.State_Selected
+
+        # Set background to white explicitly
+        painter.fillRect(option.rect, QBrush(QColor(255, 255, 255)))
+
+        # Draw the rest of the item
+        super().paint(painter, option, index)
+
 
 class CustomTableView(QTableView):
     def __init__(self, parent=None):
@@ -155,9 +184,6 @@ class MainPage(QMainWindow):
         selector_widget.setStyleSheet("background-color: #f8f9fa;")
         layout = QVBoxLayout()
         selector_widget.setLayout(layout)
-        
-        # layout.setContentsMargins(20, 20, 20, 20)
-        # layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         button = AnimatedButton("To truncate long text with an ellipsis")
         button.setMinimumWidth(80)
@@ -173,9 +199,6 @@ class MainPage(QMainWindow):
 
         content = QWidget()
         content_layout = QVBoxLayout(content)
-        # content.setStyleSheet("background-color: #ecf0f1;")
-
-
 
         tools_for_table = QWidget()
         tft_layout = QVBoxLayout(tools_for_table)
@@ -187,33 +210,8 @@ class MainPage(QMainWindow):
 
         tft_layout.addWidget(button3)
 
-        # tools_for_table.setStyleSheet("background-color: #ecf0f1;")
-        # ///////////////////////////////////////////////////////////////////////////////////////////
          # Create table
         self.table_widget = QTableWidget(60, 10)  # 20 rows, 10 columns
-
-        # self.table_widget.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
-        # self.table_widget.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
-
-        # self.table_widget.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        # self.table_widget.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-
-
-
-        # QScroller.grabGesture(self.table_widget.viewport(), QScroller.ScrollerGestureType.MiddleMouseButtonGesture)
-
-        # scroller = QScroller.scroller(self.table_widget.viewport())
-        # properties = QScrollerProperties()
-        # properties.setScrollMetric(QScrollerProperties.ScrollMetric.DecelerationFactor, 2.1)
-        # properties.setScrollMetric(QScrollerProperties.ScrollMetric.MaximumVelocity, 0.5)
-        # properties.setScrollMetric(QScrollerProperties.ScrollMetric.OvershootDragResistanceFactor, 0.3)
-        # properties.setScrollMetric(QScrollerProperties.ScrollMetric.OvershootScrollDistanceFactor, 0.2)
-        # properties.setScrollMetric(QScrollerProperties.ScrollMetric.FrameRate, QScrollerProperties.FrameRates.Fps60)
-        # properties.setScrollMetric(QScrollerProperties.ScrollMetric.ScrollingCurve, QEasingCurve.Type.OutCubic)
-
-        # scroller.setScrollerProperties(properties)
-
-        
 
         # Disable editing
         self.table_widget.setEditTriggers(QAbstractItemView.EditTrigger.DoubleClicked)
@@ -235,17 +233,7 @@ class MainPage(QMainWindow):
         row_labels = [str(i+1) for i in range(self.table_widget.rowCount())]
         self.table_widget.setVerticalHeaderLabels(row_labels)
 
-        self.table_widget.setStyleSheet("""
-            QTableWidget::item:selected {
-                background-color: transparent !important;
-                border: none;
-            }
-            QTableWidget::item {
-                background-color: white;
-            }
-        """)
-
-        # Function to evaluate formulas (sum values from referenced cells)
+        
         def evaluate_formula(formula):
             # Regular expression to match cell references (e.g., A1, C3, etc.)
             pattern = re.compile(r"([A-Z]+)(\d+)")
@@ -272,7 +260,6 @@ class MainPage(QMainWindow):
 
             return total
 
-        # Slot to handle editing of a cell
         def on_cell_edit(cell):
             row = cell.row()
             column = cell.column()
@@ -295,7 +282,17 @@ class MainPage(QMainWindow):
         # Connect the edit signal to the slot
         self.table_widget.itemChanged.connect(on_cell_edit)
 
-        self.table_widget.setItemDelegate(ExcelStyleDelegate(self.table_widget))
+
+        # self.table_widget.setItemDelegate(ExcelStyleDelegate(self.table_widget))
+        self.table_widget = ExcelStyleTableView(self)
+        model = QStandardItemModel(60, 10)
+        self.table_widget.setModel(model)
+        self.table_widget.setItemDelegate(WhiteBackgroundDelegate(self.table_widget))
+
+        # Then connect after model is set
+        self.table_widget.selectionModel().selectionChanged.connect(
+            self.table_widget._refresh_selection
+        )
 
 
         def show_cell_location(index):
@@ -311,14 +308,6 @@ class MainPage(QMainWindow):
                     # Create the message box showing the cell location
                     cell_location = f"{column_letter}{row_number}"
                     QMessageBox.information(self.table_widget, "Cell Location", f"You clicked on cell {cell_location}")        
-
-        # Connect the click signal to the slot
-        # self.table_widget.clicked.connect(show_cell_location)
-
-        # Optional: Fill some sample content
-        # for row in range(20):
-        #     for col in range(10):
-                # self.table_widget.setItem(row, col, QTableWidgetItem(f"{column_labels[col]}{row+1}"))
 
         # ///////////////////////////////////////////////////////////////////////////////////////////
 
