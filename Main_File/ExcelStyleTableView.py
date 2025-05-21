@@ -1,74 +1,16 @@
-import sys
-import os
-import win32com.client as win32
+
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QVBoxLayout, QWidget, QPushButton, 
     QFileDialog, QMessageBox, QHBoxLayout, QScrollArea, QLabel, QSplitter, QTableWidget, 
     QAbstractItemView, QHeaderView, QTableWidgetItem, QStyledItemDelegate, QStyleOptionViewItem, QTableView
 )
-from PyQt6.QtCore import Qt, QPropertyAnimation, pyqtProperty, QEasingCurve, QRect, QTimer
-from PyQt6.QtGui import QPainter, QColor, QPen, QBrush, QStandardItemModel, QStandardItem, QWheelEvent, QCursor
-from PyQt6.QtWidgets import  QStyle,QStyledItemDelegate, QApplication, QTableWidgetItem, QTableWidget, QMenu
+from PyQt6.QtCore import Qt, QPropertyAnimation, pyqtProperty, QEasingCurve, QRect, QTimer, QModelIndex
+from PyQt6.QtGui import QPainter, QColor, QPen, QBrush, QStandardItemModel, QStandardItem, QWheelEvent, QCursor, QTextOption
+from PyQt6.QtWidgets import  QStyle,QStyledItemDelegate, QApplication, QTableWidgetItem, QTableWidget, QMenu, QTextEdit
 
-import string
 import re
 
-from ExcelStyleTableView import ExcelStyleTableView  
-from Formating_toolbar import ExcelToolbarKit  
-from TextWrapDelegate import TextWrapDelegate
 
-class AnimatedButton(QPushButton):
-    def __init__(self, text):
-        super().__init__(text)
-        self._color = QColor("#6a11cb")
-        # self.setFixedSize(170, 70)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setStyleSheet("font-size: 16px; font-weight: bold; border-radius: 12px; border: none;")
-        self.update_background(self._color)
-
-        self.animation = QPropertyAnimation(self, b"color")
-        self.animation.setDuration(300)
-
-    def update_background(self, color):
-        style = f"""
-            QPushButton {{
-                background: qlineargradient(
-                    x1:0, y1:0, x2:1, y2:1,
-                    stop:0 {color.name()}, stop:1 #00ff84
-                );
-                color: white;
-                font-size: 16px;
-                font-weight: bold;
-                padding: 10px 20px;
-                border: none;
-                border-radius: 12px;
-            }}
-        """
-        self.setStyleSheet(style)
-
-    def enterEvent(self, event):
-        self.animate_to(QColor("#00b85c"))  # Green gradient start
-        super().enterEvent(event)
-
-    def leaveEvent(self, event):
-        self.animate_to(QColor("#6a11cb"))  # Original purple
-        super().leaveEvent(event)
-
-    def animate_to(self, target_color):
-        self.animation.stop()
-        self.animation.setStartValue(self._color)
-        self.animation.setEndValue(target_color)
-        self.animation.valueChanged.connect(self.update_background)
-        self.animation.start()
-
-    def get_color(self):
-        return self._color
-
-    def set_color(self, color):
-        self._color = color
-        self.update_background(color)
-
-    color = pyqtProperty(QColor, get_color, set_color)
 
 class ExcelStyleTableView(QTableView):
     def __init__(self, parent=None):
@@ -93,10 +35,8 @@ class ExcelStyleTableView(QTableView):
         self.dash_timer.timeout.connect(self.update_dash_animation)
         self.dash_timer.start(100)  # Lower = faster animation
 
-
-
-
-
+        self.setWordWrap(True)
+        self.setItemDelegate(WrapTextDelegate())
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -146,7 +86,9 @@ class ExcelStyleTableView(QTableView):
 
         # Track the last number used in Fill Series
         self.last_series_number = 2  # Initialize to 2 so first Fill Series starts at 3
-
+        
+        self.setWordWrap(True)
+        self.setItemDelegate(WrapTextDelegate())
 
 
 
@@ -179,13 +121,27 @@ class ExcelStyleTableView(QTableView):
             }
         """)
 
+    def rowCount(self, parent=QModelIndex()):
+        return self.rows
+
+    def columnCount(self, parent=QModelIndex()):
+        return self.columns
+
+    def data(self, index, role):
+        if not index.isValid():
+            return None
+        if role == Qt.ItemDataRole.DisplayRole:
+            return self.data_matrix[index.row()][index.column()]
+        return None
+
+    def flags(self, index):
+        return Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsEditable
 
     def update_dash_animation(self):
         self.dash_offset += 1.0
         if self.dash_offset >= 100.0:  # Prevent overflow
             self.dash_offset = 0.0
         self.viewport().update()
-
 
     def wheelEvent(self, event: QWheelEvent):
         now = event.timestamp()
@@ -368,9 +324,16 @@ class ExcelStyleTableView(QTableView):
     
     def setModel(self, model):
         super().setModel(model)
+        self.model().layoutChanged.connect(self.apply_merges)
+        self.apply_merges()
 
-        # Now the selectionModel is valid
-        self.selectionModel().selectionChanged.connect(self._refresh_selection)
+    def apply_merges(self):
+        self.clearSpans()
+        for top_row, left_col, row_span, col_span in self.model().merged_cells:
+            if row_span == 1 and col_span == 1:
+                continue  # Skip single-cell spans
+            self.setSpan(top_row, left_col, row_span, col_span)
+
 
     def _refresh_selection(self, selected, deselected):
         self.viewport().update()
@@ -397,7 +360,6 @@ class ExcelStyleTableView(QTableView):
             self.viewport().update()
 
         super().mousePressEvent(event)
-
 
     def mouseMoveEvent(self, event):
         # Check if mouse is over the autofill handle corner
@@ -767,285 +729,20 @@ class ExcelStyleTableView(QTableView):
                 painter.setPen(pen)
                 painter.drawRect(united_rect)
    
-class WhiteBackgroundDelegate(QStyledItemDelegate):
-    def paint(self, painter, option, index):
-        # Disable selection background
-        if option.state & QStyle.StateFlag.State_Selected:
-            option.state &= ~QStyle.StateFlag.State_Selected
-
-        # Set background to white explicitly
-        painter.fillRect(option.rect, QBrush(QColor(255, 255, 255)))
-
-        # Draw the rest of the item
-        super().paint(painter, option, index)
-
-class CustomTableView(QTableView):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.delegate = ExcelStyleDelegate(self)
-        self.setItemDelegate(self.delegate)
-        self.setSelectionMode(QTableView.ExtendedSelection)  # Enable multi-selection
-        self.selection_start_pos = None
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            index = self.indexAt(event.pos())
-            if index.isValid():
-                if event.modifiers() & Qt.ControlModifier:
-                    # Toggle selection for Ctrl+click
-                    row, col = index.row(), index.column()
-                    if (row, col) in self.delegate.selected_cells:
-                        self.delegate.selected_cells.remove((row, col))
-                    else:
-                        self.delegate.selected_cells.add((row, col))
-                else:
-                    # Start new selection
-                    self.selection_start_pos = event.pos()
-                    self.delegate.selection_start = (index.row(), index.column())
-                    self.delegate.selected_cells.clear()
-                    self.delegate.selected_cells.add((index.row(), index.column()))
-                self.viewport().update()
-        super().mousePressEvent(event)
-
-    def mouseMoveEvent(self, event):
-        if event.buttons() & Qt.LeftButton and self.selection_start_pos:
-            index = self.indexAt(event.pos())
-            if index.isValid() and self.delegate.selection_start:
-                start_row, start_col = self.delegate.selection_start
-                end_row, end_col = index.row(), index.column()
-                self.delegate.set_selection(start_row, start_col, end_row, end_col)
-                self.viewport().update()
-        super().mouseMoveEvent(event)
-
-    def mouseReleaseEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self.selection_start_pos = None
-        super().mouseReleaseEvent(event)
-
-class Spreadsheet(QTableWidget):
-    def __init__(self):
-        super().__init__()
-        self.toolbar = ExcelToolbarKit()
-        
-        # Connect toolbar signals
-        self.toolbar.alignmentChanged.connect(self.apply_alignment)
-        self.toolbar.wrapTextChanged.connect(self.apply_wrap_text)
-        self.toolbar.mergeChanged.connect(self.apply_merge)
-        
-        # When cell selection changes
-        self.cellClicked.connect(self.on_cell_clicked)
-
-    def on_cell_clicked(self, row, col):
-        """Update toolbar when cell is selected"""
-        cell = self.cellWidget(row, col) or self.item(row, col)
-        self.toolbar.update_for_cell(cell)
-
-    def apply_alignment(self, alignment):
-        """Apply alignment to selected cells"""
-        for cell in self.selected_cells():
-            cell.setAlignment(alignment)
-        self.toolbar.update_button_states()
-
-    def apply_wrap_text(self, wrap):
-        """Apply wrap text to selected cells"""
-        for cell in self.selected_cells():
-            cell.setTextInteractionFlags(Qt.TextInteractionFlag.TextEditorInteraction)
-            cell.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
-            cell.setFlags(cell.flags() | Qt.ItemFlag.ItemIsEditable)
-            cell.setText(cell.text())
-            cell.setData(Qt.ItemDataRole.UserRole, wrap)
-
-    def apply_merge(self, merge):
-        """Apply merge to selected cells"""
-        if merge:
-            self.setSpan(self.currentRow(), self.currentColumn(), 
-                       self.selectedRowCount(), self.selectedColumnCount())
-        else:
-            self.setSpan(self.currentRow(), self.currentColumn(), 1, 1)
-
-    def selected_cells(self):
-        """Get all selected cells"""
-        return [self.itemAt(index.row(), index.column()) 
-                for index in self.selectedIndexes()]
-
-class MainPage(QMainWindow):
-    def __init__(self):
-        super().__init__()
-
-        self.setWindowTitle("Main Page")
-        self.setGeometry(100,100,800,500)
-
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.setCentralWidget(splitter)
-
-        selector_widget = QWidget(self)
-        selector_widget.setStyleSheet("background-color: #f8f9fa;")
-        layout = QVBoxLayout()
-        selector_widget.setLayout(layout)
-
-        button = AnimatedButton("To truncate long text with an ellipsis")
-        button.setMinimumWidth(80)
-        button2 = AnimatedButton("Click Me 2")
-
-        button.setSizePolicy(button.sizePolicy().horizontalPolicy(), button.sizePolicy().verticalPolicy())
-        button2.setSizePolicy(button2.sizePolicy().horizontalPolicy(), button2.sizePolicy().verticalPolicy())
-
-        layout.addWidget(button)
-        layout.addWidget(button2)
-        layout.addStretch()
-
-        content = QWidget()
-        content_layout = QVBoxLayout(content)
-
-        tools_for_table = QWidget()
-        tft_layout = QVBoxLayout(tools_for_table)
-        tools_for_table.setStyleSheet("background-color: #f8f9fa;")
-
-        # Add the Excel-style toolbar
-        self.excel_toolbar = ExcelToolbarKit()
-        tft_layout.addWidget(self.excel_toolbar)
-
-        
-        self.table_widget = ExcelStyleTableView(self)
-        self.table_widget.setModelWithHeaders(30, 30)
-
-        # self.model.dataChanged.connect(self.resize_rows_for_wrapped_text)
 
 
-        self.table_widget.setItemDelegate(WhiteBackgroundDelegate(self.table_widget))
-        # self.table_widget.setSpan(row, column, row_span, column_span)
+class WrapTextDelegate(QStyledItemDelegate):
+    def createEditor(self, parent, option, index):
+        editor = QTextEdit(parent)
+        editor.setWordWrapMode(QTextOption.WrapMode.WordWrap)
+        return editor
 
+    def setEditorData(self, editor, index):
+        editor.setText(index.model().data(index, Qt.ItemDataRole.DisplayRole))
 
-        self.wrap_delegate = TextWrapDelegate(self.table_widget)
+    def setModelData(self, editor, model, index):
+        model.setData(index, editor.toPlainText(), Qt.ItemDataRole.EditRole)
 
-
-        # Connect the selectionModel after model is set
-        self.table_widget.selectionModel().selectionChanged.connect(
-            self.table_widget._refresh_selection
-        )
-        self.table_widget.selectionModel().selectionChanged.connect(
-            self.on_table_selection_changed
-        )
-
-        
-
-        content_layout.addWidget(tools_for_table)
-        content_layout.addWidget(self.table_widget)
-
-        splitter.addWidget(selector_widget)
-        splitter.addWidget(content)
-
-        splitter.setSizes([200, 600])
-
-        # Inside MainPage.__init__()
-        self.excel_toolbar.alignmentChanged.connect(self.apply_alignment_to_selected)
-        self.excel_toolbar.wrapTextChanged.connect(self.apply_wrap_text_to_selected)
-        self.excel_toolbar.mergeChanged.connect(self.apply_merge_to_selected)
-
-    def resize_rows_for_wrapped_text(self, topLeft, bottomRight, roles):
-        for row in range(topLeft.row(), bottomRight.row() + 1):
-            self.table_widget.resizeRowToContents(row)
-
-
-    def apply_alignment_to_selected(self, alignment: Qt.AlignmentFlag):
-        selected_indexes = self.table_widget.selectedIndexes()
-        for index in selected_indexes:
-            item = self.table_widget.model().itemFromIndex(index)
-            if not item:
-                item = QStandardItem()
-                self.table_widget.model().setItem(index.row(), index.column(), item)
-
-            current_alignment = item.textAlignment()
-
-            if alignment in (Qt.AlignmentFlag.AlignLeft, Qt.AlignmentFlag.AlignHCenter, Qt.AlignmentFlag.AlignRight):
-                vertical = current_alignment & (Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignBottom)
-                item.setTextAlignment(alignment | vertical)
-            else:
-                horizontal = current_alignment & (Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignRight)
-                item.setTextAlignment(horizontal | alignment)
-
-    def rowSpan(self):
-        return self.table_widget.rowSpan(index.row(), index.column())
-    def columnSpan(self):
-        return self.table_widget.columnSpan(index.row(), index.column())
-
-
-    def apply_merge_to_selected(self, merge: bool):
-        selected = self.table_widget.selectedIndexes()
-        if not selected:
-            return
-
-        rows = sorted(set(idx.row() for idx in selected))
-        cols = sorted(set(idx.column() for idx in selected))
-
-        if not (rows and cols):
-            return
-
-        top_row = rows[0]
-        left_col = cols[0]
-        row_span = len(rows)
-        col_span = len(cols)
-
-        if merge:
-            self.table_widget.setSpan(top_row, left_col, row_span, col_span)
-            # Optionally clear other spanned cells for clarity
-            for r in rows:
-                for c in cols:
-                    if r != top_row or c != left_col:
-                        self.table_widget.model().setItem(r, c, QStandardItem(""))
-        else:
-            # Unmerge by resetting spans
-            for r in rows:
-                for c in cols:
-                    self.table_widget.setSpan(r, c, 1, 1)
-
-
-    def apply_wrap_text_to_selected(self, wrap: bool):
-        if wrap:
-            self.table_widget.setItemDelegate(TextWrapDelegate(self.table_widget))
-            self.table_widget.setItemDelegate(WhiteBackgroundDelegate(self.table_widget))
-            # Resize affected rows
-            selected_rows = {index.row() for index in self.table_widget.selectedIndexes()}
-            for row in selected_rows:
-                self.table_widget.resizeRowToContents(row)
-        else:
-            self.table_widget.setItemDelegate(WhiteBackgroundDelegate(self.table_widget))
-
-
-
-    def apply_merge_to_selected(self, merge: bool):
-        # Placeholder: Implement merging using QTableView span if using QTableWidget or by hiding cells in model if not
-        selected_ranges = self.table_widget.selectedIndexes()
-        if not selected_ranges:
-            return
-
-        # If you're using QTableView + QAbstractItemModel, there's no native setSpan; you'll need a layout workaround
-        print(f"Merge selected cells: {merge} — You’ll need a visual/logic strategy for this in QTableView.")
-
-
-    def on_table_selection_changed(self, selected, deselected):
-        indexes = self.table_widget.selectedIndexes()
-        if not indexes:
-            self.excel_toolbar.update_for_cell(None)
-            return
-
-        # Take first index as reference
-        index = indexes[0]
-        item = self.table_widget.model().itemFromIndex(index)
-
-        class DummyCell:
-            def alignment(self): return item.textAlignment() if item else Qt.AlignmentFlag.AlignLeft
-            def wrapText(self): return False  # Extend if you track wrapping
-            def rowSpan(self): return 1       # Extend if you track spans
-            def columnSpan(self): return 1
-
-        self.excel_toolbar.update_for_cell(DummyCell())
-
-
-
-
-if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    window = MainPage()
-    window.show()
-    sys.exit(app.exec())
+    def updateEditorGeometry(self, editor, option, index):
+        editor.setGeometry(option.rect)
+    

@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QPropertyAnimation, pyqtProperty, QEasingCurve, QRect, QTimer
 from PyQt6.QtGui import QPainter, QColor, QPen, QBrush, QStandardItemModel, QStandardItem, QWheelEvent, QCursor
 from PyQt6.QtWidgets import  QStyle,QStyledItemDelegate, QApplication, QTableWidgetItem, QTableWidget, QMenu
-from Formating_toolbar import ExcelToolbar 
+from Main_File.Formating_toolbar import ExcelToolbar 
 
 class MainWindow(QMainWindow):
     def __init__(self):
